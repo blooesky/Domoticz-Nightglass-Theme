@@ -183,6 +183,28 @@
         _mode = readMode();
     }
 
+    /* Settle the seed the moment the editor opens.
+
+       Domoticz seeds the widget with m = LevelInt / MaxDimLevel but reads it
+       back with round(m * 99 + 1) when the scenes/groups editor saves, and
+       those disagree by one percent at 50 and below. So selecting a device
+       at 50 % and pressing Update — touching nothing at all — stored 51
+       (issue #270). No interaction is involved, which is why correcting only
+       our own writes was not enough on that page.
+
+       Rewriting the seed into the form both formulas agree on fixes it at
+       the source. Silently: setMaster fires no events of its own, and
+       updateInput is skipped as well, because triggering slidermove /
+       sliderup here would command the light merely for having opened its
+       editor. Domoticz reads the colour back through getColor(), not the
+       input text, so skipping it costs nothing. */
+    function normaliseMaster() {
+        if (_isRel || !_engine) return;
+        try {
+            $$()(_engine).wheelColorPicker('setMaster', masterFromPct(_bright), false);
+        } catch (e) { /* engine not ready; the first commit will settle it */ }
+    }
+
     /* Push our state into jQWCP and fire the events Domoticz bound to it.
        Everything downstream — the colour JSON, the 400ms debounce, the
        per-host callback — stays Domoticz's own code. */
@@ -762,6 +784,7 @@
             _host = host;
             _modes = modes;
             syncFromEngine();
+            normaliseMaster();
             render();
             return;
         }
@@ -803,6 +826,7 @@
         anchor.parentNode.insertBefore(_panel, anchor);
 
         syncFromEngine();
+        normaliseMaster();
         render();
     }
 
