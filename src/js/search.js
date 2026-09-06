@@ -1950,6 +1950,22 @@
             toggle('uppercaseNames', 'Uppercase Device Names', 'Force device names to UPPERCASE on cards') +
             toggle('longPressToggle', 'Hold to Switch', 'Press and hold a card\'s icon to switch the device on or off — works on colour lights, where a click opens the picker') +
 
+            /* An action, not a preference, so it gets buttons rather than a
+               control bound to a stored value. Two of them because they do
+               different things: one opens the tour now, the other clears
+               the "seen" flag so it opens by itself next time. */
+            '<div class="ng-setting-row">' +
+            '<div class="ng-setting-info"><span class="ng-setting-label">Feature Tour</span>' +
+            '<span class="ng-setting-desc">A guided pass through what Nightglass adds. ' +
+            'It opens once, on your first sign-in — reset it to have it open again next ' +
+            'time Domoticz loads.</span></div>' +
+            '<div class="ng-action-group">' +
+            '<button type="button" class="ng-action-btn" id="ngTourBtn">' +
+            '<i class="fa-solid fa-compass"></i> Show now</button>' +
+            '<button type="button" class="ng-action-btn" id="ngTourResetBtn">' +
+            '<i class="fa-solid fa-rotate-left"></i> Reset</button>' +
+            '</div></div>' +
+
             '</div>' +
 
             '<div class="ng-settings-section">' +
@@ -2043,8 +2059,6 @@
             '<button type="button" class="ng-import-btn" id="ngImportBtn" title="Import settings from JSON file">' +
             '<i class="fa-solid fa-file-import"></i> Import</button>' +
             '<input type="file" id="ngImportFile" accept=".json" style="display:none">' +
-            '<button type="button" class="ng-tour-btn" id="ngTourBtn" title="Replay the Nightglass feature tour">' +
-            '<i class="fa-solid fa-compass"></i> Take the tour</button>' +
             (_useNewApi
                 ? '<button type="button" class="ng-save-btn" id="ngSaveBtn" title="Save settings to the Domoticz database">' +
                   '<i class="fa-solid fa-floppy-disk"></i> Save to Domoticz</button>' +
@@ -4124,12 +4138,30 @@
         }
 
         // Export button
-        /* The tour shows itself once and then never again, so this is the
-           only way back to it. */
+        /* The tour shows itself once and then never again, so these are the
+           only ways back to it. */
         var tourBtn = container.querySelector('#ngTourBtn');
         if (tourBtn) {
             tourBtn.addEventListener('click', function () {
                 if (window.dzTour) window.dzTour.start();
+            });
+        }
+
+        /* Reset clears the flag and deliberately does NOT open the tour:
+           closing it writes the flag straight back, so opening here would
+           undo the reset the moment the user finished reading. */
+        var tourResetBtn = container.querySelector('#ngTourResetBtn');
+        if (tourResetBtn) {
+            tourResetBtn.addEventListener('click', function () {
+                if (!window.dzTour) return;
+                window.dzTour.reset();
+                var original = tourResetBtn.innerHTML;
+                tourResetBtn.innerHTML = '<i class="fa-solid fa-check"></i> Opens on next load';
+                tourResetBtn.disabled = true;
+                setTimeout(function () {
+                    tourResetBtn.innerHTML = original;
+                    tourResetBtn.disabled = false;
+                }, 2600);
             });
         }
 
