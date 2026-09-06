@@ -191,11 +191,89 @@
         });
     }
 
+    /* ── Clearing overrides saved against scenes and groups (issue #265) ──
+       The Icon Studio used to list scenes and groups, because
+       getdevices?filter=all&used=true unions the Scenes table in. Nothing
+       could ever come of picking an icon for one: the Scenes table has no
+       Icon or CustomImage column, updatescene writes neither, and the
+       theme's write goes through setused, which addresses DeviceStatus.
+       Saving reported an error, and the colour and animation went into the
+       blob regardless — where they do have an effect, because icons.js
+       resolves a scene card's idx the same way it resolves a device's.
+
+       The Studio no longer offers them, so this clears what people already
+       saved. It cannot clear everything: a scene and a device may share a
+       number, and Domoticz's own device list carries a comment about
+       exactly that. Where both exist the entry is left alone — a device
+       losing an override the user deliberately set is the worse outcome of
+       the two, and it is the one that cannot be undone from here.       */
+
+    var PURGED_KEY = 'sceneIconsPurged';
+
+    function purgeSceneOverrides(settings) {
+        if (settings.get(PURGED_KEY)) return;
+
+        fetch('json.htm?type=command&param=getdevices&filter=all&used=true',
+              { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var rows = (data && data.result) || [];
+                if (!rows.length) return;   /* say nothing, try again next load */
+
+                var scenes  = {};
+                var devices = {};
+                rows.forEach(function (d) {
+                    var idx = String(d.idx);
+                    if (d.Type === 'Scene' || d.Type === 'Group') scenes[idx] = d.Type;
+                    else devices[idx] = true;
+                });
+
+                var map     = readMap(settings);
+                var cleared = [];
+                var kept    = [];
+                Object.keys(map).forEach(function (idx) {
+                    if (!scenes[idx]) return;
+                    if (devices[idx]) { kept.push(idx); return; }
+                    delete map[idx];
+                    cleared.push(idx);
+                });
+
+                if (kept.length) {
+                    window.ngLog('[IconMigrate]', 'scene/device idx clash, left alone:',
+                                 kept.join(', '));
+                }
+
+                /* The flag is set whether or not anything was found, so the
+                   extra request happens once per account rather than on
+                   every load forever. */
+                var write = function (k, v) {
+                    return settings.setAndPersist
+                        ? settings.setAndPersist(k, v)
+                        : Promise.resolve(settings.set(k, v) || false);
+                };
+
+                if (!cleared.length) { write(PURGED_KEY, true); return; }
+
+                window.ngLog('[IconMigrate]', 'cleared', cleared.length,
+                             'scene/group icon override(s):', cleared.join(', '));
+                Promise.resolve(write(KEY, JSON.stringify(map)))
+                    .then(function () { return write(PURGED_KEY, true); });
+            })
+            .catch(function () { /* offline or refused — retry on a later load */ });
+    }
+
     var _ran = false;
     function run() {
         if (_ran) return;
         var store    = window.dzDeviceIconStore;
         var settings = window.dzNightglassSettings;
+        if (!settings) return;
+
+        /* Ahead of the store check and not gated on it: a scene has no
+           native icon to migrate, and these entries have to be cleared on a
+           Domoticz without the Icon column just the same. */
+        purgeSceneOverrides(settings);
+
         if (!store || !store.probeNative || !store.read || !store.write) return;
         _ran = true;
         /* isNative() can only answer yes from a route that has already loaded

@@ -554,7 +554,7 @@
 
 .ng-export-btn,
 .ng-import-btn,
-.ng-tour-btn {
+.ng-action-btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -571,15 +571,38 @@
 
 .ng-export-btn:hover,
 .ng-import-btn:hover,
-.ng-tour-btn:hover {
+.ng-action-btn:hover {
     background: var(--dz-surface-3);
     border-color: var(--dz-accent);
     color: var(--dz-text);
 }
 
+/* Buttons sitting in a setting row rather than the footer: they take the
+   row's right-hand column, where a toggle or select would otherwise be,
+   and must not be squeezed by a long description. */
+.ng-action-group {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.ng-action-btn:disabled {
+    cursor: default;
+    border-color: var(--dz-success, #4caf7d);
+    color: var(--dz-success, #4caf7d);
+}
+
+.ng-action-btn:disabled:hover {
+    background: var(--dz-surface-2);
+    border-color: var(--dz-success, #4caf7d);
+    color: var(--dz-success, #4caf7d);
+}
+
 .ng-export-btn i,
 .ng-import-btn i,
-.ng-tour-btn i {
+.ng-action-btn i {
     font-size: 0.9em;
     opacity: 0.7;
 }

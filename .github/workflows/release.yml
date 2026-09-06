@@ -10,6 +10,11 @@ permissions:
 jobs:
   release:
     name: Tag & publish release
+    # Upstream only. A fork that pushes to its own main would otherwise cut
+    # tags and publish releases under its own name — and fail noisily where
+    # it lacks the push rights this job needs. github.repository is the
+    # repo the workflow is running in, so a fork never matches.
+    if: github.repository == 'galadril/Domoticz-Nightglass-Theme'
     runs-on: ubuntu-latest
 
     steps:

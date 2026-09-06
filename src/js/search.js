@@ -608,6 +608,11 @@
 
         deviceIconOverrides: '{}',
 
+        /* Set once the one-shot in icon-migrate.js has cleared any icon
+           overrides saved against a scene or group — see issue #265. Keeps
+           that cleanup to a single extra request per account. */
+        sceneIconsPurged:   false,
+
         /* No iconLibraries key: extra icon fonts are Domoticz's own feature now
            (Setup → Custom Icons). Any value left over from when the theme
            managed them is still read straight out of storage by the one-shot
@@ -1950,6 +1955,22 @@
             toggle('uppercaseNames', 'Uppercase Device Names', 'Force device names to UPPERCASE on cards') +
             toggle('longPressToggle', 'Hold to Switch', 'Press and hold a card\'s icon to switch the device on or off — works on colour lights, where a click opens the picker') +
 
+            /* An action, not a preference, so it gets buttons rather than a
+               control bound to a stored value. Two of them because they do
+               different things: one opens the tour now, the other clears
+               the "seen" flag so it opens by itself next time. */
+            '<div class="ng-setting-row">' +
+            '<div class="ng-setting-info"><span class="ng-setting-label">Feature Tour</span>' +
+            '<span class="ng-setting-desc">A guided pass through what Nightglass adds. ' +
+            'It opens once, on your first sign-in — reset it to have it open again next ' +
+            'time Domoticz loads.</span></div>' +
+            '<div class="ng-action-group">' +
+            '<button type="button" class="ng-action-btn" id="ngTourBtn">' +
+            '<i class="fa-solid fa-compass"></i> Show now</button>' +
+            '<button type="button" class="ng-action-btn" id="ngTourResetBtn">' +
+            '<i class="fa-solid fa-rotate-left"></i> Reset</button>' +
+            '</div></div>' +
+
             '</div>' +
 
             '<div class="ng-settings-section">' +
@@ -2043,8 +2064,6 @@
             '<button type="button" class="ng-import-btn" id="ngImportBtn" title="Import settings from JSON file">' +
             '<i class="fa-solid fa-file-import"></i> Import</button>' +
             '<input type="file" id="ngImportFile" accept=".json" style="display:none">' +
-            '<button type="button" class="ng-tour-btn" id="ngTourBtn" title="Replay the Nightglass feature tour">' +
-            '<i class="fa-solid fa-compass"></i> Take the tour</button>' +
             (_useNewApi
                 ? '<button type="button" class="ng-save-btn" id="ngSaveBtn" title="Save settings to the Domoticz database">' +
                   '<i class="fa-solid fa-floppy-disk"></i> Save to Domoticz</button>' +
@@ -3973,14 +3992,30 @@
             });
         });
 
+        /* Scenes and groups cannot carry an icon and must never reach this
+           list (issue #265). Domoticz has no storage for one: the Scenes
+           table has no Icon or CustomImage column and updatescene writes
+           neither, so the shape had nowhere to go. Worse, the write goes
+           through setused, which addresses DeviceStatus — a scene and a
+           device can share a number, so saving a scene's icon either failed
+           outright or quietly re-iconed an unrelated device.
+
+           getdevices?filter=all&used=true unions the Scenes table in and
+           labels those rows Scene or Group, which is why they were offered
+           in the first place. Dropping them here keeps them out of the
+           list, the count and the save in one move. */
+        function iconEditable(d) {
+            return d && d.Type !== 'Scene' && d.Type !== 'Group';
+        }
+
         /* Fetch devices — window.__ngDemoDevices can be set by demo pages as a fallback */
         function loadDevices() {
           fetch('/json.htm?type=command&param=getdevices&filter=all&used=true&order=Name', { credentials: 'same-origin' })
             .then(function (r) { return r.json(); })
-            .then(function (data) { renderDevices(data.result || []); })
+            .then(function (data) { renderDevices((data.result || []).filter(iconEditable)); })
             .catch(function () {
                 if (Array.isArray(window.__ngDemoDevices)) {
-                    renderDevices(window.__ngDemoDevices);
+                    renderDevices(window.__ngDemoDevices.filter(iconEditable));
                     listEl.insertAdjacentHTML('afterbegin',
                         '<div class="ng-ov-demo-notice">' +
                         '<i class="fa-solid fa-circle-info"></i> ' +
@@ -4124,12 +4159,30 @@
         }
 
         // Export button
-        /* The tour shows itself once and then never again, so this is the
-           only way back to it. */
+        /* The tour shows itself once and then never again, so these are the
+           only ways back to it. */
         var tourBtn = container.querySelector('#ngTourBtn');
         if (tourBtn) {
             tourBtn.addEventListener('click', function () {
                 if (window.dzTour) window.dzTour.start();
+            });
+        }
+
+        /* Reset clears the flag and deliberately does NOT open the tour:
+           closing it writes the flag straight back, so opening here would
+           undo the reset the moment the user finished reading. */
+        var tourResetBtn = container.querySelector('#ngTourResetBtn');
+        if (tourResetBtn) {
+            tourResetBtn.addEventListener('click', function () {
+                if (!window.dzTour) return;
+                window.dzTour.reset();
+                var original = tourResetBtn.innerHTML;
+                tourResetBtn.innerHTML = '<i class="fa-solid fa-check"></i> Opens on next load';
+                tourResetBtn.disabled = true;
+                setTimeout(function () {
+                    tourResetBtn.innerHTML = original;
+                    tourResetBtn.disabled = false;
+                }, 2600);
             });
         }
 

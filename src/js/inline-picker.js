@@ -116,6 +116,36 @@
     var _els = {};
     var _commitTimer = 0, _commitPending = false;
 
+    /* ── The master level, and why it is written mid-band ──────────────
+       Domoticz reads this one number two incompatible ways:
+
+         save   round(m * 99 + 1)   domoticz.js:1910, and the same line
+                                    twice in ScenesController.js, which is
+                                    what the scenes/groups table stores
+         seed   round(m * 100)      the inverse of ShowRGBWPicker's own
+                                    setMaster(LevelInt / MaxDimLevel)
+
+       Writing m = pct/100 satisfies the seed and saves one percent high —
+       50 became 51, 40 became 41 (issue #270). Writing m = (pct-1)/99
+       satisfies the save and reads back one low. Either way the surface
+       that uses the other formula is wrong, and on the scenes page both
+       are in play: the picker is seeded from the stored level when a
+       device is selected, and the level is recomputed from the master
+       when Update is pressed.
+
+       So don't pick a side. For every pct there is a band of m that both
+       formulas round to pct, and this returns its midpoint — far enough
+       from either edge (the narrowest band is 5e-5) that float noise
+       cannot push it out. Whichever way Domoticz reads it, and however
+       many times it re-seeds in between, the answer is the percentage the
+       user typed. */
+    function masterFromPct(pct) {
+        var lo = Math.max((pct - 1.5) / 99, (pct - 0.5) / 100);
+        var hi = Math.min((pct - 0.5) / 99, (pct + 0.5) / 100);
+        return Math.max(0, Math.min(1, (lo + hi) / 2));
+    }
+    function pctFromMaster(m) { return Math.max(1, Math.min(100, Math.round(m * 100))); }
+
     function $$() { return window.jQuery; }
 
     /* ── Engine bridge ────────────────────────────────────────────── */
@@ -147,8 +177,32 @@
         _v = (c.v == null) ? 1 : c.v;
         _warmth = (c.t == null) ? 0.5 : c.t;
         _white = (c.w == null) ? 1 : c.w;
-        _bright = Math.max(1, Math.min(100, Math.round((c.m == null ? 1 : c.m) * 100)));
+        /* Safe against our own writes as well as Domoticz's seeds: both
+           round to the same percentage — see masterFromPct above. */
+        _bright = pctFromMaster((c.m == null) ? 1 : c.m);
         _mode = readMode();
+    }
+
+    /* Settle the seed the moment the editor opens.
+
+       Domoticz seeds the widget with m = LevelInt / MaxDimLevel but reads it
+       back with round(m * 99 + 1) when the scenes/groups editor saves, and
+       those disagree by one percent at 50 and below. So selecting a device
+       at 50 % and pressing Update — touching nothing at all — stored 51
+       (issue #270). No interaction is involved, which is why correcting only
+       our own writes was not enough on that page.
+
+       Rewriting the seed into the form both formulas agree on fixes it at
+       the source. Silently: setMaster fires no events of its own, and
+       updateInput is skipped as well, because triggering slidermove /
+       sliderup here would command the light merely for having opened its
+       editor. Domoticz reads the colour back through getColor(), not the
+       input text, so skipping it costs nothing. */
+    function normaliseMaster() {
+        if (_isRel || !_engine) return;
+        try {
+            $$()(_engine).wheelColorPicker('setMaster', masterFromPct(_bright), false);
+        } catch (e) { /* engine not ready; the first commit will settle it */ }
     }
 
     /* Push our state into jQWCP and fire the events Domoticz bound to it.
@@ -169,7 +223,7 @@
             $inp.wheelColorPicker('setHsv', _h, _s, _mode === 'custom' ? _v : 1);
             if (_hasTemp) $inp.wheelColorPicker('setTemperature', _warmth);
             $inp.wheelColorPicker('setWhite', _white);
-            if (!_isRel) $inp.wheelColorPicker('setMaster', _bright / 100);
+            if (!_isRel) $inp.wheelColorPicker('setMaster', masterFromPct(_bright));
             $inp.trigger('slidermove');
             $inp.trigger('sliderup');
         } catch (e) {
@@ -730,6 +784,7 @@
             _host = host;
             _modes = modes;
             syncFromEngine();
+            normaliseMaster();
             render();
             return;
         }
@@ -771,6 +826,7 @@
         anchor.parentNode.insertBefore(_panel, anchor);
 
         syncFromEngine();
+        normaliseMaster();
         render();
     }
 

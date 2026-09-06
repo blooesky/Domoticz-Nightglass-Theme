@@ -1343,15 +1343,15 @@
                 if (typeof window.HandleProtection === 'function') {
                     window.HandleProtection(Protected, function (passcode) {
                         _passcode = passcode || '';
-                        openWith(idx, LevelInt, color, SubType);
+                        openWith(idx, LevelInt, color, SubType, MaxDimLevel);
                     });
                     return;
                 }
                 _passcode = '';
-                openWith(idx, LevelInt, color, SubType);
+                openWith(idx, LevelInt, color, SubType, MaxDimLevel);
             };
 
-            function openWith(idx, LevelInt, color, SubType) {
+            function openWith(idx, LevelInt, color, SubType, MaxDimLevel) {
                 _idx = String(idx || '');
 
                 // color is a JSON string from device.Color
@@ -1373,9 +1373,21 @@
                 // Warmth from colour-temperature field (0-255 → 0-1)
                 _warmth = col.t !== undefined ? col.t / 255 : 0.5;
 
-                // Seed brightness from current device level (LevelInt is 0-100)
-                _bright = (LevelInt !== undefined && LevelInt !== null)
-                    ? Math.max(1, Math.min(100, parseInt(LevelInt, 10) || 100))
+                /* Seed brightness from the current device level. LevelInt is
+                   NOT a percentage: GetJSonDevices reports
+                   round(MaxDimLevel / 100 * Level), so it is in the device's
+                   own dim units. That is 100 for a Color Switch — which is
+                   why reading it raw looked right — but a Lighting5 TRC02
+                   caps at 7, and this popup opens for those too, where a
+                   light at full showed as 7 %. Normalise the way Domoticz's
+                   own picker does: setMaster(LevelInt / MaxDimLevel).
+
+                   Level 0 is an off light, and this has always opened at full
+                   there so the first press does something visible. */
+                var maxLvl = parseInt(MaxDimLevel, 10) || 100;
+                var lvl    = parseInt(LevelInt, 10);
+                _bright = (isFinite(lvl) && lvl > 0)
+                    ? Math.max(1, Math.min(100, Math.round((lvl / maxLvl) * 100)))
                     : 100;
 
                 // Show popup — MutationObserver in initPopups picks this up and calls ngOpenPopup
