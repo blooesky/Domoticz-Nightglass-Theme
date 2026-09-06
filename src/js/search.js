@@ -608,6 +608,11 @@
 
         deviceIconOverrides: '{}',
 
+        /* Set once the one-shot in icon-migrate.js has cleared any icon
+           overrides saved against a scene or group — see issue #265. Keeps
+           that cleanup to a single extra request per account. */
+        sceneIconsPurged:   false,
+
         /* No iconLibraries key: extra icon fonts are Domoticz's own feature now
            (Setup → Custom Icons). Any value left over from when the theme
            managed them is still read straight out of storage by the one-shot
@@ -3987,14 +3992,30 @@
             });
         });
 
+        /* Scenes and groups cannot carry an icon and must never reach this
+           list (issue #265). Domoticz has no storage for one: the Scenes
+           table has no Icon or CustomImage column and updatescene writes
+           neither, so the shape had nowhere to go. Worse, the write goes
+           through setused, which addresses DeviceStatus — a scene and a
+           device can share a number, so saving a scene's icon either failed
+           outright or quietly re-iconed an unrelated device.
+
+           getdevices?filter=all&used=true unions the Scenes table in and
+           labels those rows Scene or Group, which is why they were offered
+           in the first place. Dropping them here keeps them out of the
+           list, the count and the save in one move. */
+        function iconEditable(d) {
+            return d && d.Type !== 'Scene' && d.Type !== 'Group';
+        }
+
         /* Fetch devices — window.__ngDemoDevices can be set by demo pages as a fallback */
         function loadDevices() {
           fetch('/json.htm?type=command&param=getdevices&filter=all&used=true&order=Name', { credentials: 'same-origin' })
             .then(function (r) { return r.json(); })
-            .then(function (data) { renderDevices(data.result || []); })
+            .then(function (data) { renderDevices((data.result || []).filter(iconEditable)); })
             .catch(function () {
                 if (Array.isArray(window.__ngDemoDevices)) {
-                    renderDevices(window.__ngDemoDevices);
+                    renderDevices(window.__ngDemoDevices.filter(iconEditable));
                     listEl.insertAdjacentHTML('afterbegin',
                         '<div class="ng-ov-demo-notice">' +
                         '<i class="fa-solid fa-circle-info"></i> ' +
