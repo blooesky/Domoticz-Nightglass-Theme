@@ -116,35 +116,35 @@
     var _els = {};
     var _commitTimer = 0, _commitPending = false;
 
-    /* ── The master level, and why the two conversions differ ──────────
-       Domoticz's own two halves of this mapping do not agree with each
-       other. ShowRGBWPicker seeds the widget with
+    /* ── The master level, and why it is written mid-band ──────────────
+       Domoticz reads this one number two incompatible ways:
 
-           setMaster(LevelInt / MaxDimLevel)          → m = pct / 100
+         save   round(m * 99 + 1)   domoticz.js:1910, and the same line
+                                    twice in ScenesController.js, which is
+                                    what the scenes/groups table stores
+         seed   round(m * 100)      the inverse of ShowRGBWPicker's own
+                                    setMaster(LevelInt / MaxDimLevel)
 
-       but the slidermove/sliderup handler it binds stores
+       Writing m = pct/100 satisfies the seed and saves one percent high —
+       50 became 51, 40 became 41 (issue #270). Writing m = (pct-1)/99
+       satisfies the save and reads back one low. Either way the surface
+       that uses the other formula is wrong, and on the scenes page both
+       are in play: the picker is seeded from the stored level when a
+       device is selected, and the level is recomputed from the master
+       when Update is pressed.
 
-           dimlevel = Math.round(color.m * 99 + 1)    → 1..100
-
-       (domoticz.js:1910, and the same line twice in ScenesController.js).
-       Feeding that handler m = pct/100 therefore saves one percent high:
-       50 % became 51 %, 40 % became 41 % — issue #270.
-
-       So the two directions get the inverse of the formula that is
-       actually applied to them, which is not the same formula:
-
-         · writing, invert the handler:  m = (pct - 1) / 99
-         · reading, invert the seed:     pct = m * 100
-
-       Round-tripping through Domoticz is then exact. Type 50, the handler
-       stores 50, the next seed hands back 0.5, and the field reads 50. */
-    function masterFromPct(pct) { return (pct - 1) / 99; }
-    function pctFromMaster(m)   { return Math.max(1, Math.min(100, Math.round(m * 100))); }
-
-    /* The master we last pushed. A re-entrant ShowRGBWPicker re-reads the
-       widget, and reading our own write back through the seed's formula
-       would shave a percent off the field every time. */
-    var _lastMaster = null;
+       So don't pick a side. For every pct there is a band of m that both
+       formulas round to pct, and this returns its midpoint — far enough
+       from either edge (the narrowest band is 5e-5) that float noise
+       cannot push it out. Whichever way Domoticz reads it, and however
+       many times it re-seeds in between, the answer is the percentage the
+       user typed. */
+    function masterFromPct(pct) {
+        var lo = Math.max((pct - 1.5) / 99, (pct - 0.5) / 100);
+        var hi = Math.min((pct - 0.5) / 99, (pct + 0.5) / 100);
+        return Math.max(0, Math.min(1, (lo + hi) / 2));
+    }
+    function pctFromMaster(m) { return Math.max(1, Math.min(100, Math.round(m * 100))); }
 
     function $$() { return window.jQuery; }
 
@@ -177,13 +177,9 @@
         _v = (c.v == null) ? 1 : c.v;
         _warmth = (c.t == null) ? 0.5 : c.t;
         _white = (c.w == null) ? 1 : c.w;
-        var m = (c.m == null) ? 1 : c.m;
-        /* Anything but our own last write is a fresh seed from Domoticz, so
-           read it the seed's way. Our own value is already a percentage and
-           needs no conversion — see masterFromPct above. */
-        if (_lastMaster === null || Math.abs(m - _lastMaster) > 1e-6) {
-            _bright = pctFromMaster(m);
-        }
+        /* Safe against our own writes as well as Domoticz's seeds: both
+           round to the same percentage — see masterFromPct above. */
+        _bright = pctFromMaster((c.m == null) ? 1 : c.m);
         _mode = readMode();
     }
 
@@ -205,10 +201,7 @@
             $inp.wheelColorPicker('setHsv', _h, _s, _mode === 'custom' ? _v : 1);
             if (_hasTemp) $inp.wheelColorPicker('setTemperature', _warmth);
             $inp.wheelColorPicker('setWhite', _white);
-            if (!_isRel) {
-                _lastMaster = masterFromPct(_bright);
-                $inp.wheelColorPicker('setMaster', _lastMaster);
-            }
+            if (!_isRel) $inp.wheelColorPicker('setMaster', masterFromPct(_bright));
             $inp.trigger('slidermove');
             $inp.trigger('sliderup');
         } catch (e) {
@@ -752,11 +745,6 @@
         if (!host) return;
         var engine = host.querySelector('#popup_picker');
         if (!engine || !$$()) return;
-
-        /* Domoticz has just re-seeded the widget — on the scenes page that
-           may be a different device altogether — so whatever we last wrote
-           into it no longer describes what is in there now. */
-        _lastMaster = null;
 
         var led = ledTypeOf(subType);
         _hasTemp = !!(led && led.bHasTemperature);
